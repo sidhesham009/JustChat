@@ -1,92 +1,128 @@
 package com.example.sidheshmanchekar.justchat;
 
 
+import android.content.Intent;
 import android.os.Bundle;
-import android.support.design.widget.Snackbar;
+import android.support.annotation.NonNull;
 import android.support.v7.app.AppCompatActivity;
-import android.text.format.DateFormat;
+import android.support.v7.widget.LinearLayoutManager;
+import android.support.v7.widget.RecyclerView;
+import android.text.TextUtils;
 import android.view.View;
-import android.widget.ImageView;
-import android.widget.ListView;
-import android.widget.RelativeLayout;
+import android.widget.EditText;
 import android.widget.TextView;
 
-import com.firebase.ui.auth.AuthUI;
-import com.firebase.ui.database.FirebaseListAdapter;
+import com.firebase.ui.database.FirebaseRecyclerAdapter;
+import com.google.android.gms.tasks.OnCompleteListener;
+import com.google.android.gms.tasks.Task;
 import com.google.firebase.auth.FirebaseAuth;
+import com.google.firebase.auth.FirebaseUser;
+import com.google.firebase.database.DataSnapshot;
+import com.google.firebase.database.DatabaseError;
+import com.google.firebase.database.DatabaseReference;
 import com.google.firebase.database.FirebaseDatabase;
-
-import hani.momanii.supernova_emoji_library.Actions.EmojIconActions;
-import hani.momanii.supernova_emoji_library.Helper.EmojiconEditText;
-import hani.momanii.supernova_emoji_library.Helper.EmojiconTextView;
+import com.google.firebase.database.ValueEventListener;
 
 public class MainActivity extends AppCompatActivity {
 
-    private static int SIGN_IN_REQUEST_CODE = 1;
-    private FirebaseListAdapter<ChatMessage> adapter;
-    RelativeLayout activity_main;
+    private EditText editmessage;
+    private DatabaseReference db;
+    private RecyclerView messageList;
+    private FirebaseAuth auth;
+    private FirebaseAuth.AuthStateListener authStateListener;
+    private FirebaseUser currentUser;
+    private DatabaseReference dbUsers;
 
-    //Add Emojicon
-    EmojiconEditText typemsg;
-    ImageView smily,sendbutton;
-    EmojIconActions emojIconActions;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-        activity_main = (RelativeLayout)findViewById(R.id.activity_main);
+        editmessage = (EditText) findViewById(R.id.editmsg);
+        db = FirebaseDatabase.getInstance().getReference().child("Message");
+        messageList = (RecyclerView) findViewById(R.id.msglist);
+        messageList.setHasFixedSize(true);
+        LinearLayoutManager linearLayoutManager = new LinearLayoutManager(this);
+        linearLayoutManager.setStackFromEnd(true);
+        messageList.setLayoutManager(linearLayoutManager);
+        auth = FirebaseAuth.getInstance();
 
-        //Add Emoji
-        smily = (ImageView)findViewById(R.id.smily_button);
-        sendbutton = (ImageView)findViewById(R.id.send_button);
-        typemsg = (EmojiconEditText)findViewById(R.id.typemsg_et);
-        emojIconActions = new EmojIconActions(getApplicationContext(),activity_main, typemsg, smily);
-//        emojIconActions.ShowEmojicon();
-
-        sendbutton.setOnClickListener(new View.OnClickListener() {
+        authStateListener = new FirebaseAuth.AuthStateListener() {
             @Override
-            public void onClick(View v) {
-                FirebaseDatabase.getInstance().getReference().push().setValue(new ChatMessage
-                        (typemsg.getText().toString(), FirebaseAuth.getInstance()
-                                .getCurrentUser().getEmail()));
-                typemsg.setText("");
-                typemsg.requestFocus();
+            public void onAuthStateChanged(@NonNull FirebaseAuth firebaseAuth) {
+                if (firebaseAuth.getCurrentUser() == null) {
+                    startActivity(new Intent(MainActivity.this, RegisterActivity.class));
+                }
             }
-        });
-        //Check if not sign-in then navigate Signin page
-            if(FirebaseAuth.getInstance().getCurrentUser() == null)
-        {
-            startActivityForResult(AuthUI.getInstance().createSignInIntentBuilder().build(),SIGN_IN_REQUEST_CODE);
-        }
-            else
-        {
-            Snackbar.make(activity_main,"Welcome "+FirebaseAuth.getInstance().getCurrentUser().getEmail(),Snackbar.LENGTH_SHORT).show();
-            //Load content
-            displayChatMessage();
+        };
+
+    }
+
+    public void sendButtonClicked(View v) {
+        currentUser = auth.getCurrentUser();
+        dbUsers = FirebaseDatabase.getInstance().getReference().child("Users").child(currentUser.getUid());
+
+        final String msgValue = editmessage.getText().toString().trim();
+        if (!TextUtils.isEmpty(msgValue)) {
+            final DatabaseReference newPost = db.push();
+            dbUsers.addValueEventListener(new ValueEventListener() {
+                @Override
+                public void onDataChange(DataSnapshot dataSnapshot) {
+                    newPost.child("Content").setValue(msgValue);
+                    newPost.child("Username").setValue(dataSnapshot.child("Name").getValue()).addOnCompleteListener(new OnCompleteListener<Void>() {
+                        @Override
+                        public void onComplete(@NonNull Task<Void> task) {
+
+                        }
+                    });
+                }
+
+                @Override
+                public void onCancelled(DatabaseError databaseError) {
+                }
+            });
+            messageList.scrollToPosition(messageList.getAdapter().getItemCount());
         }
     }
 
-    private void displayChatMessage() {
-        ListView listOfMessage = (ListView)findViewById(R.id.list_of_message);
-        adapter = new FirebaseListAdapter<ChatMessage>(this,ChatMessage.class, R.layout.list_item,FirebaseDatabase.getInstance().getReference())
-        {
+    @Override
+    protected void onStart() {
+        super.onStart();
+
+        FirebaseRecyclerAdapter<Message, MessageViewHolder> FBRA = new FirebaseRecyclerAdapter<Message, MessageViewHolder>(
+
+                Message.class,
+                R.layout.singlemessage,
+                MessageViewHolder.class,
+                db
+        ) {
             @Override
-            protected void populateView(View v, ChatMessage model, int position) {
-
-                //Get references to the views of list_item.xml
-                TextView messageText, messageUser, messageTime;
-                messageText = (EmojiconTextView) v.findViewById(R.id.message_text);
-                messageUser = (TextView) v.findViewById(R.id.message_user);
-                messageTime = (TextView) v.findViewById(R.id.message_time);
-
-                messageText.setText(model.getMsgtxt());
-                messageUser.setText(model.getMsguser());
-                messageTime.setText(DateFormat.format("dd-MM-yyyy (HH:mm:ss)", model.getMsgtime()));
+            protected void populateViewHolder(MessageViewHolder viewHolder, Message model, int position) {
+                viewHolder.setContent(model.getContent());
+                viewHolder.setContent(model.getUsername());
 
             }
         };
-        listOfMessage.setAdapter(adapter);
+        messageList.setAdapter(FBRA);
+    }
+
+    public static class MessageViewHolder extends RecyclerView.ViewHolder {
+        View view;
+
+        public MessageViewHolder(View itemView) {
+            super(itemView);
+            view = itemView;
+        }
+
+        public void setContent(String content) {
+            TextView messageContent = (TextView) view.findViewById(R.id.textmsg);
+            messageContent.setText(content);
+        }
+
+        public void username(String username) {
+            TextView username_content = (TextView) view.findViewById(R.id.etusrname);
+            username_content.setText(username);
+        }
     }
 }
